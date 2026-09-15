@@ -332,8 +332,6 @@ def compute_p_value(
                 - mp.ncdf(left / standard_deviation)
             )
 
-    if denominator == 0:
-        return 1.0  # Conservative: no matching intervals found
 
     cdf = float(numerator / denominator)
     return 2 * min(cdf, 1 - cdf)
