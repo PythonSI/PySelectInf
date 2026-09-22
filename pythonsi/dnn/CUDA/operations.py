@@ -20,6 +20,38 @@ def relu_elementwise(a, b, z):
     return a_out, b_out, threshold, where_min, where_max
 
 
+def BatchNorm1d(a, b, params):
+    scale = params["scale"]
+    shift = params["shift"]
+    return a * scale + shift, b * scale
+
+
+def LeakyReLU(a, b, z, itv, negative_slope=0.01):
+    x = a + b * z
+    active = x >= 0
+    a_out = torch.where(active, a, negative_slope * a)
+    b_out = torch.where(active, b, negative_slope * b)
+    # Keep the legacy CUDA interval convention: an infeasible region is NaN.
+    threshold = torch.where(
+        torch.abs(b) > 1e-12,
+        -a / b,
+        torch.full_like(a, float("inf")),
+    )
+    lower_mask = (active & (b > 0)) | ((~active) & (b < 0))
+    upper_mask = (active & (b < 0)) | ((~active) & (b > 0))
+    lower_values = torch.where(
+        lower_mask, threshold, torch.full_like(threshold, float("-inf"))
+    )
+    upper_values = torch.where(
+        upper_mask, threshold, torch.full_like(threshold, float("inf"))
+    )
+    new_lower = torch.maximum(itv[0], torch.max(lower_values))
+    new_upper = torch.minimum(itv[1], torch.min(upper_values))
+    out = torch.stack([new_lower, new_upper])
+    out = torch.where(new_lower <= new_upper, out, torch.full_like(out, float("nan")))
+    return a_out, b_out, out
+
+
 def ReLU(a, b, z, itv):
     a_out, b_out, threshold, where_min, where_max = relu_elementwise(a, b, z)
     min_val_array = torch.where(

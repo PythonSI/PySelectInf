@@ -4,41 +4,51 @@ from torch import nn
 
 
 def parse_torch_model(model: nn.Module):
-    """
-    Flatten model into a list of (layer_type, tensor_or_None)
-    e.g. [("Weight", tensor), ("Bias", tensor), ("ReLU", None), ...]
+    """Parse a feed-forward PyTorch model for affine CPU inference.
 
-    Args:
-        model: PyTorch nn.Module
-        to_numpy: If True, convert tensors to numpy arrays
+    Supported layers are Linear, BatchNorm1d, ReLU, and LeakyReLU.  Containers
+    are traversed by ``modules()`` and are not emitted as layers.
     """
+    if not isinstance(model, nn.Module):
+        raise TypeError(f"Unsupported model type: {type(model)}")
+
     results = []
-
     for module in model.modules():
-        if isinstance(module, nn.Sequential) or module is model:
-            continue  # skip containers
-
-        # Handle parameterized modules (Linear, Conv, etc.)
-        if hasattr(module, "weight") or hasattr(module, "bias"):
-            w = (
-                module.weight.detach()
-                if hasattr(module, "weight") and module.weight is not None
-                else None
-            )
-            b = (
-                module.bias.detach()
-                if hasattr(module, "bias") and module.bias is not None
-                else None
-            )
-
-            w = w.cpu().numpy().T if w is not None else None
-            b = b.cpu().numpy() if b is not None else None
-
-            results.append((module.__class__.__name__, (w, b)))
+        if module is model or isinstance(module, nn.Sequential):
             continue
-        # Handle activation functions / parameterless modules
-        if not any(p.requires_grad for p in module.parameters()):
-            results.append((module.__class__.__name__, None))
+
+        if isinstance(module, nn.Linear):
+            weight = module.weight.detach().cpu().numpy().T
+            bias = (
+                module.bias.detach().cpu().numpy()
+                if module.bias is not None
+                else np.zeros(module.out_features, dtype=weight.dtype)
+            )
+            results.append(("Linear", (weight, bias)))
+        elif isinstance(module, nn.BatchNorm1d):
+            running_mean = module.running_mean.detach().cpu().numpy()
+            running_var = module.running_var.detach().cpu().numpy()
+            if module.affine:
+                gamma = module.weight.detach().cpu().numpy()
+                beta = module.bias.detach().cpu().numpy()
+            else:
+                gamma = np.ones(module.num_features, dtype=running_var.dtype)
+                beta = np.zeros(module.num_features, dtype=running_var.dtype)
+            scale = gamma / np.sqrt(running_var + module.eps)
+            shift = beta - running_mean * scale
+            results.append(("BatchNorm1d", {"scale": scale, "shift": shift}))
+        elif isinstance(module, nn.ReLU):
+            results.append(("ReLU", None))
+        elif isinstance(module, nn.LeakyReLU):
+            results.append(
+                ("LeakyReLU", {"negative_slope": float(module.negative_slope)})
+            )
+        elif isinstance(module, (nn.Identity, nn.Flatten)):
+            # The tabular target model does not use these, but they are safe
+            # no-ops for a 2-D feed-forward input.
+            continue
+        else:
+            raise TypeError(f"Unsupported DNN layer: {type(module).__name__}")
 
     return results
 
@@ -48,7 +58,6 @@ def is_torch_model(model):
 
 
 def parse_model(model):
-    if is_torch_model(model):
-        return parse_torch_model(model)
-    else:
+    if not is_torch_model(model):
         raise TypeError(f"Unsupported model type: {type(model)}")
+    return parse_torch_model(model)

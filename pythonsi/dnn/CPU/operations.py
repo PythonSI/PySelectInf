@@ -48,9 +48,6 @@ def ReLU(a, b, z, itv):
     a_out = np.where(negative_mask, 0.0, a)
     b_out = np.where(negative_mask, 0.0, b)
 
-    # For positive region (X > 0): keep original a, b
-    # (already handled by the where condition above)
-
     # Update intervals
     itv_out = itv.copy()
 
@@ -58,13 +55,11 @@ def ReLU(a, b, z, itv):
     negative_and_b_pos = negative_mask & b_positive & b_nonzero
     negative_and_b_neg = negative_mask & b_negative & b_nonzero
 
-    # For negative region with positive b: z <= -a/b, so update upper bound
     if np.any(negative_and_b_pos):
         valid_thresholds = threshold[negative_and_b_pos]
         if len(valid_thresholds) > 0:
             itv_out[1] = min(itv_out[1], np.min(valid_thresholds))
 
-    # For negative region with negative b: z >= -a/b, so update lower bound
     if np.any(negative_and_b_neg):
         valid_thresholds = threshold[negative_and_b_neg]
         if len(valid_thresholds) > 0:
@@ -74,19 +69,76 @@ def ReLU(a, b, z, itv):
     positive_and_b_pos = positive_mask & b_positive & b_nonzero
     positive_and_b_neg = positive_mask & b_negative & b_nonzero
 
-    # For positive region with positive b: z > -a/b, so update lower bound
     if np.any(positive_and_b_pos):
         valid_thresholds = threshold[positive_and_b_pos]
         if len(valid_thresholds) > 0:
             itv_out[0] = max(itv_out[0], np.max(valid_thresholds))
 
-    # For positive region with negative b: z < -a/b, so update upper bound
     if np.any(positive_and_b_neg):
         valid_thresholds = threshold[positive_and_b_neg]
         if len(valid_thresholds) > 0:
             itv_out[1] = min(itv_out[1], np.min(valid_thresholds))
 
     if itv_out[0] > itv_out[1]:
-        return a_out, b_out, np.asarray([np.nan, np.nan])  # Invalid interval
+        return a_out, b_out, np.asarray([np.nan, np.nan])
+
+    return a_out, b_out, itv_out
+
+
+def BatchNorm1d(a, b, params):
+    """Propagate through eval-mode BatchNorm1d fused as scale and shift."""
+    scale = np.asarray(params["scale"])
+    shift = np.asarray(params["shift"])
+    return a * scale + shift, b * scale
+
+
+def LeakyReLU(a, b, z, itv, negative_slope=0.01):
+    """Propagate tabular affine data through LeakyReLU."""
+    X = a + b * z
+
+    negative_mask = X < 0
+    positive_mask = X >= 0
+
+    b_nonzero = np.abs(b) > 1e-12
+    threshold = np.where(b_nonzero, -a / b, np.inf)
+
+    b_positive = b > 0
+    b_negative = b < 0
+
+    a_out = np.where(negative_mask, negative_slope * a, a)
+    b_out = np.where(negative_mask, negative_slope * b, b)
+
+    itv_out = itv.copy()
+
+    # Negative region: a + b*z < 0
+    negative_and_b_pos = negative_mask & b_positive & b_nonzero
+    negative_and_b_neg = negative_mask & b_negative & b_nonzero
+
+    if np.any(negative_and_b_pos):
+        valid_thresholds = threshold[negative_and_b_pos]
+        if len(valid_thresholds) > 0:
+            itv_out[1] = min(itv_out[1], np.min(valid_thresholds))
+
+    if np.any(negative_and_b_neg):
+        valid_thresholds = threshold[negative_and_b_neg]
+        if len(valid_thresholds) > 0:
+            itv_out[0] = max(itv_out[0], np.max(valid_thresholds))
+
+    # Positive region: a + b*z >= 0
+    positive_and_b_pos = positive_mask & b_positive & b_nonzero
+    positive_and_b_neg = positive_mask & b_negative & b_nonzero
+
+    if np.any(positive_and_b_pos):
+        valid_thresholds = threshold[positive_and_b_pos]
+        if len(valid_thresholds) > 0:
+            itv_out[0] = max(itv_out[0], np.max(valid_thresholds))
+
+    if np.any(positive_and_b_neg):
+        valid_thresholds = threshold[positive_and_b_neg]
+        if len(valid_thresholds) > 0:
+            itv_out[1] = min(itv_out[1], np.min(valid_thresholds))
+
+    if itv_out[0] > itv_out[1]:
+        return a_out, b_out, np.asarray([np.nan, np.nan])
 
     return a_out, b_out, itv_out

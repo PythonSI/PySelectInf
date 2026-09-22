@@ -17,28 +17,49 @@ def parse_torch_model(model: nn.Module):
         if isinstance(module, nn.Sequential) or module is model:
             continue  # skip containers
 
-        # Handle parameterized modules (Linear, Conv, etc.)
-        if hasattr(module, "weight") or hasattr(module, "bias"):
-            w = (
-                module.weight.detach()
-                if hasattr(module, "weight") and module.weight is not None
-                else None
-            )
-            b = (
-                module.bias.detach()
-                if hasattr(module, "bias") and module.bias is not None
-                else None
-            )
-
-            w = w.T.to("cuda") if w is not None else None
-            b = b.to("cuda") if b is not None else None
-
-            results.append((module.__class__.__name__, (w, b)))
+        if isinstance(module, nn.BatchNorm1d):
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA was requested but is not available")
+            running_mean = module.running_mean.detach().to("cuda", dtype=torch.float32)
+            running_var = module.running_var.detach().to("cuda", dtype=torch.float32)
+            if module.affine:
+                gamma = module.weight.detach().to("cuda", dtype=torch.float32)
+                beta = module.bias.detach().to("cuda", dtype=torch.float32)
+            else:
+                gamma = torch.ones(module.num_features, device="cuda")
+                beta = torch.zeros(module.num_features, device="cuda")
+            scale = gamma / torch.sqrt(running_var + module.eps)
+            shift = beta - running_mean * scale
+            results.append(("BatchNorm1d", {"scale": scale, "shift": shift}))
             continue
-        # Handle activation functions / parameterless modules
-        if not any(p.requires_grad for p in module.parameters()):
-            results.append((module.__class__.__name__, None))
 
+        if isinstance(module, nn.Linear):
+            w = module.weight.detach().T.to("cuda", dtype=torch.float32)
+            # Preserve the legacy Linear operation: represent bias=False as a
+            # zero bias tensor rather than changing that operation's contract.
+            b = (
+                module.bias.detach().to("cuda", dtype=torch.float32)
+                if module.bias is not None
+                else torch.zeros(module.out_features, device="cuda")
+            )
+            results.append(("Linear", (w, b)))
+            continue
+
+        if isinstance(module, nn.LeakyReLU):
+            results.append(("LeakyReLU", float(module.negative_slope)))
+            continue
+
+        if isinstance(module, nn.ReLU):
+            results.append(("ReLU", None))
+            continue
+
+        # Unsupported parameterized modules must not be silently ignored.
+        if hasattr(module, "weight") or hasattr(module, "bias"):
+            raise TypeError(f"Unsupported CUDA DNN layer: {type(module).__name__}")
+        if isinstance(module, (nn.Identity, nn.Flatten)):
+            continue
+        if not any(p.requires_grad for p in module.parameters()):
+            raise TypeError(f"Unsupported CUDA DNN layer: {type(module).__name__}")
     return results
 
 
