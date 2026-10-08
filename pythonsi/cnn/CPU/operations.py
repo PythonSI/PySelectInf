@@ -120,7 +120,8 @@ def LeakyReLU(a, b, z, itv, negative_slope=0.01):
 
     # Compute constraints
     b_nonzero = np.abs(b) > 1e-12
-    threshold = np.where(b_nonzero, -a / b, np.inf)
+    safe_b = np.where(b_nonzero, b, 1.0) # avoid division by zero warning: np.where evaluates -a/b eagerly before filtering
+    threshold = np.where(b_nonzero, -a / safe_b, np.inf)
 
     b_positive = b > 0
     b_negative = b < 0

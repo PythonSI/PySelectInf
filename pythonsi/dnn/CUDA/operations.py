@@ -11,10 +11,12 @@ def Linear(a, b, params):
 def relu_elementwise(a, b, z):
     X = a + b * z
     neg_mask = X <= 0
+    # Avoid division by zero and NaN gradients (torch.where evaluates -a/b eagerly before filtering)
     b_nz = torch.abs(b) > 1e-12
+    safe_b = torch.where(b_nz, b, torch.ones_like(b))
     a_out = torch.where(neg_mask, torch.tensor(0.0, device=a.device), a)
     b_out = torch.where(neg_mask, torch.tensor(0.0, device=b.device), b)
-    threshold = torch.where(b_nz, -a / b, torch.tensor(float("inf"), device=a.device))
+    threshold = torch.where(b_nz, -a / safe_b, torch.tensor(float("inf"), device=a.device))
     where_min = (neg_mask & (b > 0)) | (~neg_mask & (b < 0))
     where_max = (neg_mask & (b < 0)) | (~neg_mask & (b > 0))
     return a_out, b_out, threshold, where_min, where_max
@@ -32,9 +34,12 @@ def LeakyReLU(a, b, z, itv, negative_slope=0.01):
     a_out = torch.where(active, a, negative_slope * a)
     b_out = torch.where(active, b, negative_slope * b)
     # Keep the legacy CUDA interval convention: an infeasible region is NaN.
+    # Avoid division by zero and NaN gradients (torch.where evaluates -a/b eagerly before filtering)
+    b_nz = torch.abs(b) > 1e-12
+    safe_b = torch.where(b_nz, b, torch.ones_like(b))
     threshold = torch.where(
-        torch.abs(b) > 1e-12,
-        -a / b,
+        b_nz,
+        -a / safe_b,
         torch.full_like(a, float("inf")),
     )
     lower_mask = (active & (b > 0)) | ((~active) & (b < 0))
