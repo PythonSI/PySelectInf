@@ -66,9 +66,11 @@ autoencoder = AutoEncoder(
     input_dim=100, encoder_hidden_dims=[16, 8, 4, 2], decoder_hidden_dims=[2, 4, 8, 16]
 )
 
-feature_extractor.load_state_dict(torch.load("./models/weights/feature_extractor.pth"))
-autoencoder.load_state_dict(torch.load("./models/weights/autoencoder.pth"))
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
+feature_extractor.load_state_dict(torch.load("./models/weights/feature_extractor.pth", map_location=device))
+autoencoder.load_state_dict(torch.load("./models/weights/autoencoder.pth", map_location=device))
+    
 feature_extractor = feature_extractor.to(torch.float32)
 autoencoder = autoencoder.to(torch.float32)
 
@@ -82,11 +84,11 @@ def STAND_DA() -> Pipeline:
     xt = Data()
 
     rl_based_da = RepresentationLearningDA(
-        model=feature_extractor, device="cuda"
-    )  # or "cpu"
+        model=feature_extractor, device=device
+    )  
     x_tilde = rl_based_da.run(xs=xs, xt=xt)
 
-    autoencoder_ad = AutoEncoderAD(model=autoencoder, device="cuda")  # or "cpu"
+    autoencoder_ad = AutoEncoderAD(model=autoencoder, device=device)  
     anomaly_indices = autoencoder_ad.run(x=x_tilde, only_target_indices=xt)
 
     return Pipeline(
