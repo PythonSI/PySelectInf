@@ -11,10 +11,10 @@ import os
 from pathlib import Path
 
 # Add pythonsi to module search path
-REPO = Path(__file__).resolve().parent
-while REPO.name and not (REPO / "pythonsi").exists():
-    REPO = REPO.parent
-sys.path.insert(0, str(REPO))
+# REPO = Path(__file__).resolve().parent
+# while REPO.name and not (REPO / "pythonsi").exists():
+#     REPO = REPO.parent
+# sys.path.insert(0, str(REPO))
 
 import numpy as np
 import torch
@@ -25,7 +25,7 @@ from pythonsi.anomaly_detection import DeepSVDDAD
 from pythonsi.test_statistics import DeepSVDDTestStatistic
 
 # Add dnn directory to path to import network
-sys.path.insert(0, str(Path(__file__).resolve().parent / "deepsvdd" / "dnn"))
+# sys.path.insert(0, str(Path(__file__).resolve().parent / "deepsvdd" / "dnn"))
 from models.deepsvdd.dnn.network import MLP
 
 # %%
@@ -42,8 +42,8 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # %%
 # Load Trained Model
 # ------------------
-script_dir = Path(__file__).resolve().parent
-ckpt_path = script_dir / "models" / "deepsvdd" / "dnn" / "weights" / "mlp_encoder.pth"
+# script_dir = Path(__file__).resolve().parent
+ckpt_path = "./models/deepsvdd/dnn/weights/mlp_encoder.pth"
 ckpt = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
 cfg = ckpt["config"]
 
